@@ -7,19 +7,25 @@
 //
 
 import UIKit
+import CoreData
+
 
 class TodoListViewController: UITableViewController {
 
     var itemArray = [Item]()
-    let dataFilePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("Items.plist")
+    
+    var selectedCategory : Category? {
+        didSet{
+            loadItems()
+        }
+    }
+    
+    let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
 
-    
-    let defaults = UserDefaults.standard
-    
+        
     override func viewDidLoad() {
         super.viewDidLoad()
         
-         loadItems()
     }
 
     //MARK: - TableView Datasource Methods
@@ -57,8 +63,12 @@ class TodoListViewController: UITableViewController {
         
         let action = UIAlertAction(title: "Add Item", style: .default) { (action) in
             //what will happen once the user clicks the Add Item button on the alert
-            let newItem = Item()
+            let newItem = Item(context: self.context)
+            
             newItem.title = textField.text!
+            newItem.done = false
+            newItem.parentCategory = self.selectedCategory
+            
             self.itemArray.append(newItem)
             
             self.saveItems()
@@ -77,29 +87,62 @@ class TodoListViewController: UITableViewController {
     //MARK: - Model Manipulation Methods
     
     func saveItems () {
-        let encoder = PropertyListEncoder()
         do {
-            let myData = try encoder.encode(itemArray)
-            try myData.write (to: dataFilePath!)
+            try context.save()
         }
         catch {
-            print ("Error writing item to plist \(error)")
+            print("Error saving context \(error)")
         }
         tableView.reloadData()
     }
     
-    func loadItems () {
+    func loadItems (with request : NSFetchRequest<Item> = Item.fetchRequest(), predicate : NSPredicate? = nil) {
+
+        // default above is an empty request which will retrieve all rows
         
-        if let myData = try? Data(contentsOf: dataFilePath!) {
-            let decoder = PropertyListDecoder()
-            do {
-                itemArray = try decoder.decode([Item].self, from: myData)
-            }
-            catch {
-                print("Error decoding = \(error)")
-            }
+        let categoryPredicate = NSPredicate(format: "parentCategory.name MATCHES %@", selectedCategory!.name!)
+        
+        if let additionalPredicate = predicate {
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [categoryPredicate, additionalPredicate])
+        } else {
+            request.predicate = categoryPredicate
         }
         
+        do {
+        itemArray = try context.fetch(request)
+        }
+        catch {
+            print ("Error fetching data from context \(error)")
+        }
+        tableView.reloadData()
+    
+    }
+    
+
+}
+
+//MARK: - Searchbar methods
+
+extension TodoListViewController : UISearchBarDelegate {
+    
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        
+        let request : NSFetchRequest<Item> = Item.fetchRequest()
+        let predicate = NSPredicate(format: "title CONTAINS[cd] %@", searchBar.text!)
+        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        
+        loadItems (with: request, predicate: predicate)
+    }
+    
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        if searchBar.text?.count == 0 {
+            loadItems()
+            
+            DispatchQueue.main.async {
+                searchBar.resignFirstResponder()
+            }
+           
+        }
     }
     
 }
